@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AuditScan — Plateforme d'Audit</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+
+    <!-- Fond animé avec particules -->
+    <div class="bg-grid"></div>
+    <canvas id="particles"></canvas>
+
+    <!-- Header -->
+    <header class="header">
+        <div class="logo">
+            <span class="logo-icon">⬡</span>
+            <span class="logo-text">AuditScan</span>
+            <span class="logo-version">v1.0</span>
+        </div>
+        <nav class="nav">
+            <span class="nav-item active" data-section="scan">Scanner</span>
+            <span class="nav-item" data-section="history">Historique</span>
+        </nav>
+        <div class="status-bar">
+            <span class="status-dot"></span>
+            <span class="status-text">API connectée</span>
+        </div>
+    </header>
+
+    <!-- Section Scanner -->
+    <main class="main" id="section-scan">
+
+        <!-- Hero -->
+        <section class="hero">
+            <div class="hero-label">PLATEFORME D'AUDIT AUTOMATISÉ</div>
+            <h1 class="hero-title">
+                Analysez n'importe quel<br>
+                <span class="hero-accent">domaine en quelques secondes</span>
+            </h1>
+            <p class="hero-sub">DNS · SSL · HTTP Headers · Ports réseau · Performance</p>
+        </section>
+
+        <!-- Input scan -->
+        <section class="scan-section">
+            <div class="scan-card">
+                <div class="scan-card-header">
+                    <span class="terminal-prompt">root@auditscan:~$</span>
+                </div>
+                <div class="scan-input-row">
+                    <div class="input-wrapper">
+                        <span class="input-prefix">scan</span>
+                        <input
+                            type="text"
+                            id="domain-input"
+                            class="domain-input"
+                            placeholder="exemple.com"
+                            autocomplete="off"
+                            spellcheck="false"
+                        />
+                    </div>
+                    <button class="scan-btn" id="scan-btn" onclick="launchScan()">
+                        <span class="scan-btn-text">LANCER</span>
+                        <span class="scan-btn-icon">→</span>
+                    </button>
+                </div>
+                <div class="scan-hints">
+                    <span class="hint" onclick="fillDomain('google.com')">google.com</span>
+                    <span class="hint" onclick="fillDomain('github.com')">github.com</span>
+                    <span class="hint" onclick="fillDomain('cloudflare.com')">cloudflare.com</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Loading -->
+        <section class="loading-section" id="loading-section" style="display:none">
+            <div class="loading-card">
+                <div class="loading-header">
+                    <div class="loading-spinner"></div>
+                    <span id="loading-domain-name">Analyse en cours...</span>
+                </div>
+                <div class="loading-steps" id="loading-steps">
+                    <div class="step" id="step-dns">
+                        <span class="step-icon">⬡</span>
+                        <span class="step-label">Analyse DNS</span>
+                        <span class="step-status pending">en attente</span>
+                    </div>
+                    <div class="step" id="step-ssl">
+                        <span class="step-icon">⬡</span>
+                        <span class="step-label">Certificat SSL</span>
+                        <span class="step-status pending">en attente</span>
+                    </div>
+                    <div class="step" id="step-http">
+                        <span class="step-icon">⬡</span>
+                        <span class="step-label">Headers HTTP</span>
+                        <span class="step-status pending">en attente</span>
+                    </div>
+                    <div class="step" id="step-ports">
+                        <span class="step-icon">⬡</span>
+                        <span class="step-label">Scan réseau</span>
+                        <span class="step-status pending">en attente</span>
+                    </div>
+                    <div class="step" id="step-tech">
+                        <span class="step-icon">⬡</span>
+                        <span class="step-label">Détection technologies</span>
+                        <span class="step-status pending">en attente</span>
+                    </div>
+                    <div class="step" id="step-perf">
+                        <span class="step-icon">⬡</span>
+                        <span class="step-label">Performance</span>
+                        <span class="step-status pending">en attente</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Résultats -->
+        <section class="results-section" id="results-section" style="display:none">
+
+            <!-- Score global -->
+            <div class="results-header">
+                <div class="results-title-block">
+                    <div class="results-label">RAPPORT D'AUDIT</div>
+                    <h2 class="results-domain" id="results-domain-name">—</h2>
+                    <div class="results-date" id="results-date">—</div>
+                </div>
+                <div class="score-block">
+                    <svg class="score-ring" viewBox="0 0 120 120">
+                        <circle class="score-ring-bg" cx="60" cy="60" r="50"/>
+                        <circle class="score-ring-fill" id="score-ring-fill" cx="60" cy="60" r="50"/>
+                    </svg>
+                    <div class="score-center">
+                        <div class="score-number" id="score-number">0</div>
+                        <div class="score-label">/ 100</div>
+                    </div>
+                    <div class="score-grade" id="score-grade">—</div>
+                </div>
+            </div>
+
+            <!-- Grille de modules -->
+            <div class="modules-grid">
+
+                <!-- DNS -->
+                <div class="module-card" id="card-dns">
+                    <div class="module-header">
+                        <span class="module-icon">◈</span>
+                        <span class="module-title">Analyse DNS</span>
+                        <span class="module-status" id="dns-status">—</span>
+                    </div>
+                    <div class="module-badges" id="dns-badges"></div>
+                    <div class="module-details" id="dns-details"></div>
+                </div>
+
+                <!-- SSL -->
+                <div class="module-card" id="card-ssl">
+                    <div class="module-header">
+                        <span class="module-icon">◈</span>
+                        <span class="module-title">Certificat SSL</span>
+                        <span class="module-status" id="ssl-status">—</span>
+                    </div>
+                    <div class="module-badges" id="ssl-badges"></div>
+                    <div class="module-details" id="ssl-details"></div>
+                </div>
+
+                <!-- HTTP -->
+                <div class="module-card" id="card-http">
+                    <div class="module-header">
+                        <span class="module-icon">◈</span>
+                        <span class="module-title">Headers HTTP</span>
+                        <span class="module-status" id="http-status">—</span>
+                    </div>
+                    <div class="module-badges" id="http-badges"></div>
+                    <div class="module-details" id="http-details"></div>
+                </div>
+
+                <!-- Ports -->
+                <div class="module-card" id="card-ports">
+                    <div class="module-header">
+                        <span class="module-icon">◈</span>
+                        <span class="module-title">Ports Réseau</span>
+                        <span class="module-status" id="ports-status">—</span>
+                    </div>
+                    <div class="ports-table-wrapper" id="ports-table-wrapper"></div>
+                </div>
+
+                <!-- Performance -->
+                <div class="module-card" id="card-perf">
+                    <div class="module-header">
+                        <span class="module-icon">◈</span>
+                        <span class="module-title">Performance</span>
+                        <span class="module-status" id="perf-status">—</span>
+                    </div>
+                    <div class="perf-metrics" id="perf-metrics"></div>
+                </div>
+
+                <!-- Technologies -->
+                <div class="module-card" id="card-tech">
+                    <div class="module-header">
+                        <span class="module-icon">◈</span>
+                        <span class="module-title">Technologies</span>
+                        <span class="module-status" id="tech-status">—</span>
+                    </div>
+                    <div class="module-badges" id="tech-badges"></div>
+                    <div class="module-details" id="tech-details"></div>
+                </div>
+
+                <!-- Issues -->
+                <div class="module-card issues-card" id="card-issues">
+                    <div class="module-header">
+                        <span class="module-icon">⚠</span>
+                        <span class="module-title">Problèmes détectés</span>
+                        <span class="issues-count" id="issues-count">0</span>
+                    </div>
+                    <div class="issues-list" id="issues-list"></div>
+                </div>
+
+            </div>
+
+            <!-- Bouton nouveau scan -->
+            <div class="new-scan-row">
+                <button class="new-scan-btn" onclick="resetScan()">
+                    ← Nouveau scan
+                </button>
+                <button class="export-btn" onclick="exportReport()">
+                    Exporter le rapport ↓
+                </button>
+            </div>
+
+        </section>
+
+    </main>
+
+    <!-- Section Historique -->
+    <main class="main" id="section-history" style="display:none">
+        <section class="hero">
+            <div class="hero-label">HISTORIQUE</div>
+            <h1 class="hero-title">Scans <span class="hero-accent">précédents</span></h1>
+        </section>
+        <div class="history-grid" id="history-grid">
+            <div class="history-empty">Aucun scan enregistré pour le moment.</div>
+        </div>
+    </main>
+
+    <script src="app.js"></script>
+</body>
+</html>
