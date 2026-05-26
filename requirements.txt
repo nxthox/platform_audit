@@ -9,3 +9,4 @@ cryptography==42.0.5
 python-nmap==0.7.1
 python-dotenv==1.0.1
 pydantic==2.6.4
+reportlab

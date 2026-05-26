@@ -5,6 +5,7 @@ from backend import models
 from backend.modules import dns_scan, ssl_scan, http_scan, port_scan, perf_scan, scoring, tech_scan
 from fastapi.middleware.cors import CORSMiddleware
 
+
 # Crée toutes les tables dans PostgreSQL si elles n'existent pas
 Base.metadata.create_all(bind=engine)
 
@@ -135,3 +136,86 @@ def get_scan(scan_id: int, db: Session = Depends(get_db)):
 def list_domains(db: Session = Depends(get_db)):
     domains = db.query(models.Domain).all()
     return domains
+
+from fastapi.responses import FileResponse
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet
+import tempfile, os
+
+@app.get("/report/{scan_id}")
+def generate_report(scan_id: int, db: Session = Depends(get_db)):
+    scan = db.query(models.Scan).filter_by(id=scan_id).first()
+    if not scan:
+        raise HTTPException(404, "Scan non trouvé")
+
+    dns  = scan.dns_results
+    ssl  = scan.ssl_results
+    http = scan.http_results
+
+    # Créer un fichier PDF temporaire
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+    doc = SimpleDocTemplate(tmp.name, pagesize=A4)
+    styles = getSampleStyleSheet()
+    elements = []
+
+    # Titre
+    elements.append(Paragraph(f"Rapport d'audit — {scan.domain.domain}", styles["Title"]))
+    elements.append(Paragraph(f"Date : {scan.date_scan.strftime('%d/%m/%Y %H:%M')}", styles["Normal"]))
+    elements.append(Spacer(1, 20))
+
+    # Score global
+    elements.append(Paragraph(f"Score global : {scan.global_score}/100", styles["Heading1"]))
+    elements.append(Spacer(1, 12))
+
+    # Tableau des scores
+    data = [
+        ["Catégorie", "Score", "Statut"],
+        ["DNS",  f"{dns.score}/100"  if dns  else "N/A", "✓" if dns  and dns.score  >= 70 else "✗"],
+        ["SSL",  f"{ssl.score}/100"  if ssl  else "N/A", "✓" if ssl  and ssl.score  >= 70 else "✗"],
+        ["HTTP", f"{http.score}/100" if http else "N/A", "✓" if http and http.score >= 70 else "✗"],
+    ]
+    t = Table(data, colWidths=[200, 100, 80])
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#1F3864")),
+        ("TEXTCOLOR",  (0,0), (-1,0), colors.white),
+        ("FONTNAME",   (0,0), (-1,0), "Helvetica-Bold"),
+        ("ALIGN",      (0,0), (-1,-1), "CENTER"),
+        ("GRID",       (0,0), (-1,-1), 0.5, colors.grey),
+        ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.whitesmoke, colors.white]),
+    ]))
+    elements.append(t)
+    elements.append(Spacer(1, 20))
+
+    # Détail DNS
+    elements.append(Paragraph("Analyse DNS", styles["Heading2"]))
+    if dns:
+        elements.append(Paragraph(f"SPF : {'✓ Présent' if dns.has_spf else '✗ Absent'}", styles["Normal"]))
+        elements.append(Paragraph(f"DKIM : {'✓ Présent' if dns.has_dkim else '✗ Absent'}", styles["Normal"]))
+        elements.append(Paragraph(f"DMARC : {'✓ Présent' if dns.has_dmarc else '✗ Absent'}", styles["Normal"]))
+    elements.append(Spacer(1, 12))
+
+    # Détail SSL
+    elements.append(Paragraph("Certificat SSL", styles["Heading2"]))
+    if ssl:
+        elements.append(Paragraph(f"Validité : {'✓ Valide' if ssl.is_valid else '✗ Invalide'}", styles["Normal"]))
+        elements.append(Paragraph(f"Expire dans : {ssl.days_left} jours", styles["Normal"]))
+        elements.append(Paragraph(f"Version TLS : {ssl.tls_version}", styles["Normal"]))
+    elements.append(Spacer(1, 12))
+
+    # Détail HTTP
+    elements.append(Paragraph("Headers HTTP", styles["Heading2"]))
+    if http:
+        elements.append(Paragraph(f"HSTS : {'✓' if http.has_hsts else '✗'}", styles["Normal"]))
+        elements.append(Paragraph(f"CSP : {'✓' if http.has_csp else '✗'}", styles["Normal"]))
+        elements.append(Paragraph(f"X-Frame-Options : {'✓' if http.has_xframe else '✗'}", styles["Normal"]))
+
+    doc.build(elements)
+
+    return FileResponse(
+        tmp.name,
+        media_type="application/pdf",
+        filename=f"audit_{scan.domain.domain}_{scan_id}.pdf",
+        background=None
+    )

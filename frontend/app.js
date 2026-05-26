@@ -9,23 +9,24 @@ const API_URL = 'http://localhost:8000';
 // Historique des scans (stocké en mémoire)
 let scanHistory = JSON.parse(localStorage.getItem('auditHistory') || '[]');
 
+// Données du dernier scan (pour l'export PDF)
+let lastScanData   = null;
+let lastScanDomain = null;
+
 // ============================================
 // NAVIGATION
 // ============================================
 
 document.querySelectorAll('.nav-item').forEach(item => {
     item.addEventListener('click', () => {
-        // Retire la classe active de tous les items
         document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
         item.classList.add('active');
 
         const section = item.dataset.section;
 
-        // Cache toutes les sections
         document.getElementById('section-scan').style.display    = 'none';
         document.getElementById('section-history').style.display = 'none';
 
-        // Affiche la bonne section
         document.getElementById(`section-${section}`).style.display = 'block';
 
         if (section === 'history') renderHistory();
@@ -59,7 +60,6 @@ document.querySelectorAll('.nav-item').forEach(item => {
 
     function init() {
         resize();
-        // Crée 60 particules
         particles = Array.from({ length: 60 }, createParticle);
     }
 
@@ -67,22 +67,18 @@ document.querySelectorAll('.nav-item').forEach(item => {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
         particles.forEach(p => {
-            // Déplace la particule
             p.x += p.vx;
             p.y += p.vy;
 
-            // Rebondit sur les bords
             if (p.x < 0 || p.x > canvas.width)  p.vx *= -1;
             if (p.y < 0 || p.y > canvas.height) p.vy *= -1;
 
-            // Dessine un point
             ctx.beginPath();
             ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
             ctx.fillStyle = `rgba(0, 212, 255, ${p.opacity})`;
             ctx.fill();
         });
 
-        // Dessine des lignes entre les particules proches
         particles.forEach((a, i) => {
             particles.slice(i + 1).forEach(b => {
                 const dist = Math.hypot(a.x - b.x, a.y - b.y);
@@ -129,13 +125,11 @@ function fillDomain(domain) {
 async function launchScan() {
     const domain = document.getElementById('domain-input').value.trim();
 
-    // Validation basique
     if (!domain) {
         shakeInput();
         return;
     }
 
-    // Nettoie le domaine (enlève http://, https://, www.)
     const cleanDomain = domain
         .replace(/^https?:\/\//, '')
         .replace(/^www\./, '')
@@ -143,51 +137,41 @@ async function launchScan() {
 
     document.getElementById('domain-input').value = cleanDomain;
 
-    // Cache les résultats précédents, affiche le loading
     document.getElementById('results-section').style.display = 'none';
     document.getElementById('loading-section').style.display = 'block';
     document.getElementById('loading-domain-name').textContent = `Analyse de ${cleanDomain}...`;
 
-    // Désactive le bouton pendant le scan
     const btn = document.getElementById('scan-btn');
     btn.classList.add('loading');
     btn.querySelector('.scan-btn-text').textContent = 'SCAN...';
 
-    // Anime les étapes du loading une par une
     const steps = ['dns', 'ssl', 'http', 'ports', 'perf', 'tech'];
     animateSteps(steps);
 
     try {
-        // Appel à l'API FastAPI : POST /scan?domain=exemple.com
         const response = await fetch(`${API_URL}/scan?domain=${cleanDomain}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
         });
 
-        if (!response.ok) {
-            throw new Error(`Erreur API: ${response.status}`);
-        }
+        if (!response.ok) throw new Error(`Erreur API: ${response.status}`);
 
         const data = await response.json();
 
-        // Marque toutes les étapes comme terminées
         steps.forEach(s => markStepDone(s));
-
-        // Petite pause pour laisser voir "done"
         await sleep(500);
 
-        // Cache le loading, affiche les résultats
         document.getElementById('loading-section').style.display = 'none';
         document.getElementById('results-section').style.display = 'block';
 
-        // Affiche les résultats
-        renderResults(cleanDomain, data);
+        // Sauvegarde pour l'export PDF
+        lastScanData   = data;
+        lastScanDomain = cleanDomain;
 
-        // Sauvegarde dans l'historique
+        renderResults(cleanDomain, data);
         saveToHistory(cleanDomain, data);
 
     } catch (error) {
-        // En cas d'erreur API : affiche un mock pour le développement
         console.warn('API non disponible, affichage des données de démonstration:', error);
 
         steps.forEach(s => markStepDone(s));
@@ -196,11 +180,15 @@ async function launchScan() {
         document.getElementById('loading-section').style.display = 'none';
         document.getElementById('results-section').style.display = 'block';
 
-        // Données de démo pour tester l'interface sans l'API
-        renderResults(cleanDomain, getMockData(cleanDomain));
+        const mockData = getMockData(cleanDomain);
+
+        // Sauvegarde pour l'export PDF
+        lastScanData   = mockData;
+        lastScanDomain = cleanDomain;
+
+        renderResults(cleanDomain, mockData);
     }
 
-    // Réactive le bouton
     btn.classList.remove('loading');
     btn.querySelector('.scan-btn-text').textContent = 'LANCER';
 }
@@ -210,6 +198,7 @@ async function launchScan() {
 // ============================================
 
 function getMockData(domain) {
+    const seed = domain.length;
     return {
         score: 72,
         dns: {
@@ -232,7 +221,7 @@ function getMockData(domain) {
         ssl: {
             valid: true,
             expiry_date: '2025-11-15T00:00:00',
-            cert_type: 'Let\'s Encrypt',
+            cert_type: "Let's Encrypt",
             tls_version: 'TLSv1.3'
         },
         http: {
@@ -254,7 +243,6 @@ function getMockData(domain) {
             { severity: 'medium', description: 'DKIM absent — risque de spoofing email' },
             { severity: 'medium', description: 'CSP absent — risque d\'injection XSS' },
         ]
-        
     };
 }
 
@@ -265,7 +253,6 @@ function getMockData(domain) {
 async function animateSteps(steps) {
     for (const step of steps) {
         markStepRunning(step);
-        // Simule le temps de chaque module (aléatoire entre 600ms et 2s)
         await sleep(600 + Math.random() * 1400);
     }
 }
@@ -294,7 +281,6 @@ function markStepDone(stepName) {
 
 function renderResults(domain, data) {
 
-    // --- Domaine et date ---
     document.getElementById('results-domain-name').textContent = domain;
     document.getElementById('results-date').textContent =
         'Scanné le ' + new Date().toLocaleDateString('fr-FR', {
@@ -302,10 +288,7 @@ function renderResults(domain, data) {
             hour: '2-digit', minute: '2-digit'
         });
 
-    // --- Score (animation de la jauge) ---
     renderScore(data.score);
-
-    // --- Modules ---
     renderDNS(data.dns);
     renderSSL(data.ssl);
     renderHTTP(data.http);
@@ -314,6 +297,41 @@ function renderResults(domain, data) {
     renderIssues(data.issues);
     renderTechnologies(data.technologies);
 
+    // ── BOUTON PDF ──────────────────────────────────────────────────
+    // Cherche s'il y a déjà un bouton PDF (pour éviter les doublons)
+    let pdfBtn = document.getElementById('pdf-export-btn');
+    if (!pdfBtn) {
+        // Crée le bouton et l'insère juste après le bouton "Exporter JSON"
+        // (adapte le sélecteur si ton bouton JSON a un autre id/classe)
+        pdfBtn = document.createElement('button');
+        pdfBtn.id        = 'pdf-export-btn';
+        pdfBtn.onclick   = exportPDF;
+        pdfBtn.innerHTML = '📄 Rapport PDF';
+        // Mets le même style que ton bouton d'export existant
+        pdfBtn.style.cssText = `
+            margin-left: 10px;
+            padding: 8px 18px;
+            background: #e74c3c;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: bold;
+            cursor: pointer;
+            letter-spacing: 0.05em;
+        `;
+
+        // Insère le bouton à côté du bouton "Exporter JSON"
+        // Cherche le bouton JSON par son onclick ou sa classe
+        const jsonBtn = document.querySelector('[onclick="exportReport()"]');
+        if (jsonBtn && jsonBtn.parentNode) {
+            jsonBtn.parentNode.insertBefore(pdfBtn, jsonBtn.nextSibling);
+        } else {
+            // Fallback : ajoute à la fin de results-section
+            document.getElementById('results-section').appendChild(pdfBtn);
+        }
+    }
+    // ────────────────────────────────────────────────────────────────
 }
 
 // --- Score ---
@@ -322,24 +340,20 @@ function renderScore(score) {
     const ringEl  = document.getElementById('score-ring-fill');
     const gradeEl = document.getElementById('score-grade');
 
-    // Circonférence du cercle (r=50 → 2π×50 ≈ 314)
     const circumference = 2 * Math.PI * 50;
 
-    // Anime le compteur de 0 à score
     let current = 0;
-    const duration = 1200; // ms
+    const duration = 1200;
     const startTime = performance.now();
 
     function update(now) {
-        const elapsed = now - startTime;
+        const elapsed  = now - startTime;
         const progress = Math.min(elapsed / duration, 1);
-        // Courbe ease-out
-        const eased = 1 - Math.pow(1 - progress, 3);
+        const eased    = 1 - Math.pow(1 - progress, 3);
 
         current = Math.round(score * eased);
         numEl.textContent = current;
 
-        // Mise à jour de la jauge SVG
         const offset = circumference - (current / 100) * circumference;
         ringEl.style.strokeDashoffset = offset;
 
@@ -348,7 +362,6 @@ function renderScore(score) {
 
     requestAnimationFrame(update);
 
-    // Couleur et grade selon le score
     let gradeText, gradeClass, ringColor;
     if (score >= 80) {
         gradeText = 'EXCELLENT';  gradeClass = 'grade-excellent'; ringColor = '#00ff88';
@@ -380,18 +393,15 @@ function renderDNS(dns) {
 
     const passCount = checks.filter(c => c.ok).length;
 
-    // Status global
     statusEl.textContent = `${passCount}/3`;
     statusEl.className = `module-status ${passCount === 3 ? 'ok' : passCount >= 2 ? 'warn' : 'fail'}`;
 
-    // Badges SPF / DKIM / DMARC
     badgesEl.innerHTML = checks.map(c =>
         `<span class="badge ${c.ok ? 'ok' : 'fail'}">${c.label}</span>`
     ).join('');
 
-    // Détails
     detailsEl.innerHTML = [
-        { key: 'Adresses IP (A)', val: (dns.A || []).join(', ') || '—' },
+        { key: 'Adresses IP (A)',    val: (dns.A  || []).join(', ') || '—' },
         { key: 'Serveurs mail (MX)', val: (dns.MX || []).join(', ') || '—' },
     ].map(r =>
         `<div class="detail-row">
@@ -407,12 +417,11 @@ function renderSSL(ssl) {
     const detailsEl = document.getElementById('ssl-details');
     const statusEl  = document.getElementById('ssl-status');
 
-    // Calcule le nombre de jours avant expiration
     let daysLeft = null;
     let expiryStr = '—';
     if (ssl.expiry_date) {
         const expiry = new Date(ssl.expiry_date);
-        daysLeft = Math.ceil((expiry - new Date()) / (1000 * 60 * 60 * 24));
+        daysLeft  = Math.ceil((expiry - new Date()) / (1000 * 60 * 60 * 24));
         expiryStr = expiry.toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
     }
 
@@ -465,7 +474,6 @@ function renderPorts(ports) {
     const wrapperEl = document.getElementById('ports-table-wrapper');
     const statusEl  = document.getElementById('ports-status');
 
-    // Ports considérés comme dangereux
     const dangerousPorts = [21, 22, 23, 25, 3306, 3389, 5900, 6379, 8080, 27017];
 
     if (!ports || ports.length === 0) {
@@ -475,8 +483,8 @@ function renderPorts(ports) {
         return;
     }
 
-    const openCount    = ports.length;
-    const dangerCount  = ports.filter(p => dangerousPorts.includes(p.port)).length;
+    const openCount   = ports.length;
+    const dangerCount = ports.filter(p => dangerousPorts.includes(p.port)).length;
     statusEl.textContent = `${openCount} ouverts`;
     statusEl.className = `module-status ${dangerCount > 0 ? 'warn' : 'ok'}`;
 
@@ -497,7 +505,7 @@ function renderPorts(ports) {
                         <td class="port-number">${p.port}</td>
                         <td class="port-service">${p.service}</td>
                         <td class="${p.state === 'open' ? 'port-state' : 'port-warn'}">${p.state}</td>
-                        <td class="${isDangerous ? 'port-warn' : 'port-state'}">${isDangerous ? '⚠ Dangereux' : '✓ OK'}</td>
+                        <td class="${isDangerous ? 'port-warn' : 'port-state'}">${isDangerous ? 'Dangereux' : 'OK'}</td>
                     </tr>`;
                 }).join('')}
             </tbody>
@@ -520,7 +528,6 @@ function renderPerformance(perf) {
     statusEl.textContent = `${score}/100`;
     statusEl.className = `module-status ${score >= 80 ? 'ok' : score >= 50 ? 'warn' : 'fail'}`;
 
-    // Chaque métrique avec une barre de progression
     const metrics = [
         {
             label: 'Temps de chargement',
@@ -558,7 +565,6 @@ function renderPerformance(perf) {
         </div>
     `).join('');
 
-    // Anime les barres après un court délai
     setTimeout(() => {
         document.querySelectorAll('.perf-bar-fill').forEach(bar => {
             bar.style.width = bar.dataset.target + '%';
@@ -578,7 +584,6 @@ function renderIssues(issues) {
         return;
     }
 
-    // Trie par sévérité : critical > high > medium > low
     const severityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
     const sorted = [...issues].sort((a, b) =>
         (severityOrder[a.severity] ?? 4) - (severityOrder[b.severity] ?? 4)
@@ -595,6 +600,51 @@ function renderIssues(issues) {
     `).join('');
 }
 
+// --- Technologies ---
+function renderTechnologies(tech) {
+    const badgesEl  = document.getElementById('tech-badges');
+    const detailsEl = document.getElementById('tech-details');
+    const statusEl  = document.getElementById('tech-status');
+
+    if (!tech) {
+        statusEl.textContent = 'N/A';
+        return;
+    }
+
+    const detected = tech.raw_detected || [];
+    statusEl.textContent = detected.length > 0 ? `${detected.length} détectés` : 'Aucun';
+    statusEl.className = `module-status ${detected.length > 0 ? 'ok' : 'warn'}`;
+
+    const badges = [];
+    if (tech.cms)
+        badges.push(`<span class="badge ok">${tech.cms}</span>`);
+    (tech.frameworks_js || []).forEach(fw =>
+        badges.push(`<span class="badge info">${fw}</span>`)
+    );
+    if (tech.server)
+        badges.push(`<span class="badge info">${tech.server}</span>`);
+    if (tech.cdn)
+        badges.push(`<span class="badge info">CDN: ${tech.cdn}</span>`);
+
+    badgesEl.innerHTML = badges.length > 0 ? badges.join('') : '<span class="badge fail">Rien détecté</span>';
+
+    const rows = [
+        { key: 'CMS',           val: tech.cms       || 'Non détecté' },
+        { key: 'Frameworks JS', val: (tech.frameworks_js || []).join(', ') || 'Aucun' },
+        { key: 'Serveur',       val: tech.server    || 'Masqué' },
+        { key: 'Langage',       val: tech.language  || 'Non détecté' },
+        { key: 'CDN',           val: tech.cdn       || 'Aucun' },
+        { key: 'Analytics',     val: (tech.analytics || []).join(', ') || 'Aucun' },
+    ];
+
+    detailsEl.innerHTML = rows.map(r =>
+        `<div class="detail-row">
+            <span class="detail-key">${r.key}</span>
+            <span class="detail-val">${r.val}</span>
+        </div>`
+    ).join('');
+}
+
 // ============================================
 // RESET
 // ============================================
@@ -604,7 +654,6 @@ function resetScan() {
     document.getElementById('domain-input').value = '';
     document.getElementById('domain-input').focus();
 
-    // Remet les étapes de loading à leur état initial
     ['dns', 'ssl', 'http', 'ports', 'perf'].forEach(s => {
         const el = document.getElementById(`step-${s}`);
         if (!el) return;
@@ -615,7 +664,7 @@ function resetScan() {
 }
 
 // ============================================
-// EXPORT RAPPORT (JSON)
+// EXPORT RAPPORT JSON (fonction existante)
 // ============================================
 
 function exportReport() {
@@ -640,6 +689,349 @@ function exportReport() {
 }
 
 // ============================================
+// EXPORT RAPPORT PDF  ← NOUVEAU
+// ============================================
+
+function exportPDF() {
+    // Vérifie que jsPDF est bien chargé
+    if (typeof window.jspdf === 'undefined') {
+        alert('Erreur : la librairie jsPDF n\'est pas chargée. Vérifie le <script> dans index.html.');
+        return;
+    }
+
+    const { jsPDF } = window.jspdf;
+    const doc  = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const data = lastScanData;
+    const domain = lastScanDomain || document.getElementById('results-domain-name').textContent;
+    const date   = new Date().toLocaleDateString('fr-FR', {
+        day: '2-digit', month: 'long', year: 'numeric',
+        hour: '2-digit', minute: '2-digit'
+    });
+    const score  = parseInt(document.getElementById('score-number').textContent) || 0;
+
+    const W = 210; // largeur A4 en mm
+
+    // ── Helpers dessin ──────────────────────────────────────────────
+
+    // Dessine un rectangle arrondi rempli
+    function filledRect(x, y, w, h, hex) {
+        doc.setFillColor(...hexToRgb(hex));
+        doc.roundedRect(x, y, w, h, 2, 2, 'F');
+    }
+
+    // Convertit un code hexa en [r, g, b]
+    function hexToRgb(hex) {
+        const r = parseInt(hex.slice(1,3),16);
+        const g = parseInt(hex.slice(3,5),16);
+        const b = parseInt(hex.slice(5,7),16);
+        return [r, g, b];
+    }
+
+    // Couleur selon le score
+    function scoreHex(s) {
+        if (s >= 80) return '#00c853';
+        if (s >= 60) return '#00b0ff';
+        if (s >= 40) return '#ffb300';
+        return '#f44336';
+    }
+
+    // Texte centré horizontalement
+    function centerText(text, y, size, hex) {
+        doc.setFontSize(size);
+        doc.setTextColor(...hexToRgb(hex));
+        doc.text(text, W / 2, y, { align: 'center' });
+    }
+
+    // Ligne horizontale
+    function hLine(y, hex = '#dddddd') {
+        doc.setDrawColor(...hexToRgb(hex));
+        doc.line(14, y, W - 14, y);
+    }
+
+    // Pastille OK / KO
+    function badge(x, y, ok) {
+        filledRect(x, y - 3.5, 16, 5, ok ? '#e8f5e9' : '#ffebee');
+        doc.setFontSize(7);
+        doc.setTextColor(...hexToRgb(ok ? '#2e7d32' : '#c62828'));
+        doc.text(ok ? '✓ OK' : '✗ KO', x + 8, y, { align: 'center' });
+    }
+
+    // ── En-tête ──────────────────────────────────────────────────────
+    // Bande bleue en haut
+    filledRect(0, 0, W, 32, '#0d1b2a');
+
+    doc.setFontSize(20);
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.text('AUDIT REPORT', 14, 14);
+
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(180, 210, 255);
+    doc.text(domain, 14, 22);
+    doc.text(`Généré le ${date}`, W - 14, 22, { align: 'right' });
+
+    // Logo texte à droite
+    doc.setFontSize(13);
+    doc.setTextColor(0, 212, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.text('AuditScan', W - 14, 13, { align: 'right' });
+
+    // ── Score global ─────────────────────────────────────────────────
+    let y = 42;
+    filledRect(14, y, W - 28, 28, '#f8f9fa');
+
+    // Grand score à gauche
+    doc.setFontSize(36);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...hexToRgb(scoreHex(score)));
+    doc.text(`${score}`, 30, y + 20);
+
+    doc.setFontSize(13);
+    doc.setTextColor(100, 100, 100);
+    doc.setFont('helvetica', 'normal');
+    doc.text('/ 100', 30 + doc.getTextWidth(`${score}`) + 2, y + 20);
+
+    // Grade
+    const grade = score >= 80 ? 'EXCELLENT' : score >= 60 ? 'BON' : score >= 40 ? 'MOYEN' : 'CRITIQUE';
+    filledRect(75, y + 9, 30, 10, scoreHex(score));
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(255, 255, 255);
+    doc.text(grade, 90, y + 16, { align: 'center' });
+
+    // Barre de progression du score
+    const barX = 115;
+    filledRect(barX, y + 10, 70, 6, '#e0e0e0');
+    filledRect(barX, y + 10, 70 * score / 100, 6, scoreHex(score));
+
+    doc.setFontSize(7);
+    doc.setTextColor(120, 120, 120);
+    doc.setFont('helvetica', 'normal');
+    doc.text('Score de sécurité', barX, y + 8);
+
+    // ── Section DNS ───────────────────────────────────────────────────
+    y += 36;
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(30, 30, 30);
+    doc.text('DNS', 14, y);
+    hLine(y + 2);
+
+    y += 8;
+    if (data && data.dns) {
+        const dns = data.dns;
+
+        // Badges SPF / DKIM / DMARC
+        [
+            { label: 'SPF',   ok: dns.SPF },
+            { label: 'DKIM',  ok: dns.DKIM },
+            { label: 'DMARC', ok: dns.DMARC },
+        ].forEach((item, i) => {
+            const bx = 14 + i * 42;
+            filledRect(bx, y - 4, 38, 10, item.ok ? '#e8f5e9' : '#ffebee');
+            doc.setFontSize(8);
+            doc.setFont('helvetica', 'bold');
+            doc.setTextColor(...hexToRgb(item.ok ? '#2e7d32' : '#c62828'));
+            doc.text(`${item.ok ? '✓' : '✗'} ${item.label}`, bx + 19, y + 2, { align: 'center' });
+        });
+
+        y += 14;
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(80, 80, 80);
+        doc.text(`Adresses IP (A) :  ${(dns.A || []).join(', ') || '—'}`, 14, y);
+        y += 5;
+        doc.text(`Serveurs mail (MX) :  ${(dns.MX || []).join(', ') || '—'}`, 14, y);
+    }
+
+    // ── Section SSL ───────────────────────────────────────────────────
+    y += 10;
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(30, 30, 30);
+    doc.text('SSL / Certificat', 14, y);
+    hLine(y + 2);
+
+    y += 8;
+    if (data && data.ssl) {
+        const ssl = data.ssl;
+
+        let daysLeft = null;
+        let expiryStr = '—';
+        if (ssl.expiry_date) {
+            const expiry = new Date(ssl.expiry_date);
+            daysLeft  = Math.ceil((expiry - new Date()) / (1000 * 60 * 60 * 24));
+            expiryStr = expiry.toLocaleDateString('fr-FR');
+        }
+
+        const sslItems = [
+            { label: 'Certificat',    val: ssl.valid ? 'Valide'        : 'Invalide',    ok: ssl.valid },
+            { label: 'Version TLS',   val: ssl.tls_version || '—',                      ok: ssl.tls_version && ssl.tls_version.includes('1.3') },
+            { label: 'Expiration',    val: expiryStr,                                   ok: daysLeft > 30 },
+            { label: 'Jours restants',val: daysLeft !== null ? `${daysLeft} jours` : '—', ok: daysLeft > 30 },
+        ];
+
+        sslItems.forEach((item, i) => {
+            const col  = i % 2;
+            const row  = Math.floor(i / 2);
+            const cx   = 14 + col * 93;
+            const cy   = y + row * 10;
+
+            doc.setFontSize(7);
+            doc.setTextColor(130, 130, 130);
+            doc.setFont('helvetica', 'normal');
+            doc.text(item.label.toUpperCase(), cx, cy);
+
+            doc.setFontSize(9);
+            doc.setTextColor(...hexToRgb(item.ok ? '#2e7d32' : '#c62828'));
+            doc.setFont('helvetica', 'bold');
+            doc.text(item.val, cx, cy + 5);
+        });
+        y += 22;
+    }
+
+    // ── Section HTTP Headers ──────────────────────────────────────────
+    y += 4;
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(30, 30, 30);
+    doc.text('Headers HTTP de sécurité', 14, y);
+    hLine(y + 2);
+
+    y += 8;
+    if (data && data.http) {
+        const http = data.http;
+        const httpItems = [
+            { label: 'HSTS',           ok: http.hsts },
+            { label: 'CSP',            ok: http.csp },
+            { label: 'X-Frame-Options',ok: http.x_frame },
+            { label: 'X-Content-Type', ok: http.x_content_type },
+        ];
+
+        httpItems.forEach((item, i) => {
+            const bx = 14 + i * 47;
+            filledRect(bx, y - 4, 43, 10, item.ok ? '#e8f5e9' : '#ffebee');
+            doc.setFontSize(8);
+            doc.setFont('helvetica', 'bold');
+            doc.setTextColor(...hexToRgb(item.ok ? '#2e7d32' : '#c62828'));
+            doc.text(`${item.ok ? '✓' : '✗'} ${item.label}`, bx + 21, y + 2, { align: 'center' });
+        });
+        y += 14;
+    }
+
+    // ── Section Performance ───────────────────────────────────────────
+    y += 4;
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(30, 30, 30);
+    doc.text('Performance', 14, y);
+    hLine(y + 2);
+
+    y += 8;
+    if (data && data.performance) {
+        const perf = data.performance;
+        const perfItems = [
+            { label: 'Temps de chargement', val: `${perf.load_time_ms} ms` },
+            { label: 'Taille de la page',   val: `${perf.page_size_kb} Ko` },
+            { label: 'Score performance',   val: `${perf.score} / 100` },
+        ];
+
+        perfItems.forEach((item, i) => {
+            const cx = 14 + i * 62;
+            doc.setFontSize(7);
+            doc.setTextColor(130, 130, 130);
+            doc.setFont('helvetica', 'normal');
+            doc.text(item.label.toUpperCase(), cx, y);
+            doc.setFontSize(10);
+            doc.setTextColor(30, 30, 30);
+            doc.setFont('helvetica', 'bold');
+            doc.text(item.val, cx, y + 6);
+        });
+        y += 16;
+    }
+
+    // ── Section Technologies ──────────────────────────────────────────
+    y += 4;
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(30, 30, 30);
+    doc.text('Technologies détectées', 14, y);
+    hLine(y + 2);
+
+    y += 8;
+    if (data && data.technologies) {
+        const tech = data.technologies;
+        const techRows = [
+            { label: 'CMS',           val: tech.cms || 'Non détecté' },
+            { label: 'Frameworks JS', val: (tech.frameworks_js || []).join(', ') || 'Aucun' },
+            { label: 'Serveur',       val: tech.server || 'Masqué' },
+            { label: 'CDN',           val: tech.cdn || 'Aucun' },
+        ];
+
+        techRows.forEach((row, i) => {
+            const col = i % 2;
+            const rw  = Math.floor(i / 2);
+            const cx  = 14 + col * 93;
+            const cy  = y + rw * 10;
+            doc.setFontSize(7);
+            doc.setTextColor(130, 130, 130);
+            doc.setFont('helvetica', 'normal');
+            doc.text(row.label.toUpperCase(), cx, cy);
+            doc.setFontSize(9);
+            doc.setTextColor(40, 40, 40);
+            doc.setFont('helvetica', 'bold');
+            doc.text(row.val, cx, cy + 5);
+        });
+        y += 22;
+    }
+
+    // ── Section Problèmes détectés ────────────────────────────────────
+    y += 4;
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(30, 30, 30);
+    doc.text('Problèmes détectés', 14, y);
+    hLine(y + 2);
+
+    y += 8;
+    if (data && data.issues && data.issues.length > 0) {
+        const sevColor = { critical: '#b71c1c', high: '#e53935', medium: '#f57c00', low: '#1976d2' };
+        data.issues.forEach(issue => {
+            const hex = sevColor[issue.severity] || '#666666';
+            filledRect(14, y - 3.5, 22, 5, hex + '22');
+            doc.setFontSize(7);
+            doc.setFont('helvetica', 'bold');
+            doc.setTextColor(...hexToRgb(hex));
+            doc.text(issue.severity.toUpperCase(), 25, y, { align: 'center' });
+
+            doc.setFontSize(8);
+            doc.setFont('helvetica', 'normal');
+            doc.setTextColor(50, 50, 50);
+            doc.text(issue.description, 40, y);
+            y += 7;
+        });
+    } else {
+        doc.setFontSize(9);
+        doc.setTextColor(46, 125, 50);
+        doc.setFont('helvetica', 'normal');
+        doc.text('✓ Aucun problème critique détecté', 14, y);
+        y += 7;
+    }
+
+    // ── Pied de page ──────────────────────────────────────────────────
+    filledRect(0, 287, W, 10, '#0d1b2a');
+    doc.setFontSize(7);
+    doc.setTextColor(180, 210, 255);
+    doc.setFont('helvetica', 'normal');
+    doc.text('AuditScan v1.0 — Rapport généré automatiquement', W / 2, 293, { align: 'center' });
+
+    // ── Téléchargement ────────────────────────────────────────────────
+    const filename = `audit-${domain}-${new Date().toISOString().slice(0,10)}.pdf`;
+    doc.save(filename);
+}
+
+// ============================================
 // HISTORIQUE
 // ============================================
 
@@ -651,10 +1043,9 @@ function saveToHistory(domain, data) {
         issues: (data.issues || []).length
     };
 
-    // Évite les doublons (même domaine = écrase l'ancien)
     scanHistory = scanHistory.filter(e => e.domain !== domain);
-    scanHistory.unshift(entry); // Ajoute en tête de liste
-    if (scanHistory.length > 20) scanHistory = scanHistory.slice(0, 20); // Max 20
+    scanHistory.unshift(entry);
+    if (scanHistory.length > 20) scanHistory = scanHistory.slice(0, 20);
 
     localStorage.setItem('auditHistory', JSON.stringify(scanHistory));
 }
@@ -688,7 +1079,6 @@ function renderHistory() {
 }
 
 function loadFromHistory(domain) {
-    // Bascule sur le scanner et relance un scan
     document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
     document.querySelector('[data-section="scan"]').classList.add('active');
     document.getElementById('section-history').style.display = 'none';
@@ -701,12 +1091,10 @@ function loadFromHistory(domain) {
 // UTILITAIRES
 // ============================================
 
-// Pause (Promise qui attend N millisecondes)
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// Secoue l'input si vide
 function shakeInput() {
     const input = document.getElementById('domain-input').parentElement;
     input.style.transition = 'transform 0.1s';
@@ -714,50 +1102,4 @@ function shakeInput() {
     steps.forEach((v, i) => {
         setTimeout(() => input.style.transform = `translateX(${v}px)`, i * 60);
     });
-}
-
-function renderTechnologies(tech) {
-    const badgesEl  = document.getElementById('tech-badges');
-    const detailsEl = document.getElementById('tech-details');
-    const statusEl  = document.getElementById('tech-status');
-
-    if (!tech) {
-        statusEl.textContent = 'N/A';
-        return;
-    }
-
-    const detected = tech.raw_detected || [];
-    statusEl.textContent = detected.length > 0 ? `${detected.length} détectés` : 'Aucun';
-    statusEl.className = `module-status ${detected.length > 0 ? 'ok' : 'warn'}`;
-
-    // Badges CMS + Frameworks JS
-    const badges = [];
-    if (tech.cms)
-        badges.push(`<span class="badge ok">${tech.cms}</span>`);
-    (tech.frameworks_js || []).forEach(fw =>
-        badges.push(`<span class="badge info">${fw}</span>`)
-    );
-    if (tech.server)
-        badges.push(`<span class="badge info">${tech.server}</span>`);
-    if (tech.cdn)
-        badges.push(`<span class="badge info">CDN: ${tech.cdn}</span>`);
-
-    badgesEl.innerHTML = badges.length > 0 ? badges.join('') : '<span class="badge fail">Rien détecté</span>';
-
-    // Détails
-    const rows = [
-        { key: 'CMS',          val: tech.cms       || 'Non détecté' },
-        { key: 'Frameworks JS', val: (tech.frameworks_js || []).join(', ') || 'Aucun' },
-        { key: 'Serveur',       val: tech.server    || 'Masqué' },
-        { key: 'Langage',       val: tech.language  || 'Non détecté' },
-        { key: 'CDN',           val: tech.cdn       || 'Aucun' },
-        { key: 'Analytics',     val: (tech.analytics || []).join(', ') || 'Aucun' },
-    ];
-
-    detailsEl.innerHTML = rows.map(r =>
-        `<div class="detail-row">
-            <span class="detail-key">${r.key}</span>
-            <span class="detail-val">${r.val}</span>
-        </div>`
-    ).join('');
 }
