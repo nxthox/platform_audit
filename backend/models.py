@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text
 from sqlalchemy.sql import func
-from backend.database import Base
+from database import Base
 
 class Domain(Base):
     __tablename__ = "domains"

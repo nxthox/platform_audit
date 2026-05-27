@@ -1,8 +1,8 @@
 from fastapi import FastAPI, Depends
 from sqlalchemy.orm import Session
-from backend.database import engine, Base, get_db
-from backend import models
-from backend.modules import dns_scan, ssl_scan, http_scan, port_scan, perf_scan, scoring, tech_scan
+from database import engine, Base, get_db
+import models
+from modules import dns_scan, ssl_scan, http_scan, port_scan, perf_scan, scoring, tech_scan
 from fastapi.middleware.cors import CORSMiddleware
 
 
